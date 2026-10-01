@@ -8,8 +8,7 @@ embedding:
   model: embed-multilingual-v3.0
 
 chunking:
-  max_tokens: 200          # the hosted tokenizer isn't available locally; token counts are approximated, so stay conservative
-
+  max_tokens: 800
 reranker:
   provider: cohere
   model: rerank-multilingual-v3.0

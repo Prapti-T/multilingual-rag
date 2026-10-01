@@ -1,180 +1,116 @@
-# mlrag: multilingual (Nepali / English) RAG on Qdrant
+# Blind Spots of Qwen3-4B: Nepali Units, Currency, and Calendar Arithmetic
 
-A small, readable RAG system for question answering over a mixed Nepali–English corpus, built
-around the things that go wrong when a retrieval pipeline built for English meets Devanagari,
-Romanized Nepali and inconsistent spelling. Retrieval quality is *measured*, not assumed: the
-repo ships an evaluation harness that compares dense, sparse and hybrid retrieval across query
-variants (Devanagari, Romanized, misspelled, English).
+This project is my submission for the Fatima Fellowship technical challenge, *Blind Spots of Frontier Models*.
 
-**Provenance.** This is an independent implementation on public data (Wikipedia, CC BY-SA 4.0). It
-was written to demonstrate the retrieval and evaluation approach I use for multilingual educational
-RAG; it contains no code, data, prompts or architecture from any employer.
+I evaluated `Qwen/Qwen3-4B` on everyday Nepali quantitative reasoning tasks involving local measurement systems, currency, and calendar arithmetic. The study investigates whether the model's answers change across English, Devanagari Nepali, and Romanized Nepali, and whether providing relevant factual context improves its performance.
 
-```
-Wikipedia (en + aligned ne)                                   query (ne / Romanized ne / en)
-        │  mlrag fetch                                               │
-        ▼                                                            ▼
- sections ──► sentence-aware chunks ──► dense vector (any embedder)   dense query vector ─┐
-              (token budget from        + BM25 sparse vector           BM25 query vector ─┤
-               the embedder's own       (Unicode-aware analyzer)                           ▼
-               tokenizer)                        │                     Qdrant: prefetch both, fuse with RRF
-                                                 ▼                                         │
-                                  Qdrant collection (named dense + sparse vectors)          ▼
-                                                                          optional cross-encoder / Cohere rerank
-                                                                                           │
-                                                                                           ▼
-                                                              grounded answer with [n] citations, or [NO_ANSWER]
-```
+The focus is a specific, practical question: **Can a small open-weight language model reliably reason about everyday quantities that depend on Nepali conventions and local knowledge?**
 
-## What is specific to multilingual retrieval here
+## Research Questions
 
-| Problem | What the code does | Where |
-|---|---|---|
-| Python's `\w+` splits Devanagari words at every vowel sign (matras are combining marks, not "alphanumeric") | Tokenizer walks Unicode categories (`L`, `M`, `N`) so *नेपालको* stays one token | `text.py`, tested in `test_text.py` |
-| Hrasva/dirgha (short/long vowel) spelling varies in real text, so lexical match silently fails | Optional vowel-length folding in the **sparse analyzer only** (display text is never altered); evaluate on/off with `ne_typo` queries | `text.py`, `sparse.py` |
-| Nepali sentences end with `।`, not only `.` | Sentence splitter handles danda (`।`, `॥`) | `text.split_sentences` |
-| Chunking with one tokenizer and embedding with another overflows or wastes context, and Devanagari costs many more tokens per word than English | Chunk budget is measured with the **embedder's own tokenizer**; `tok/word` is reported per query variant in the evaluation | `chunking.py`, `embedders.py` |
-| Dense and BM25 scores live on different scales, so thresholding or averaging them is fragile | Reciprocal Rank Fusion, server-side in Qdrant, no score calibration; reranker is optional and swappable | `store.py`, `retrieve.py` |
-| Corpus changes shouldn't need a vocabulary rebuild | Terms hashed to u32 sparse indices; IDF applied by Qdrant (`Modifier.IDF`) so it stays correct as the corpus grows | `sparse.py` |
-| Re-ingesting duplicates data | Deterministic chunk ids (uuid5 of document + position) make ingestion idempotent | `chunking.py` |
-| Chunk ids change whenever chunking changes, breaking an eval set | Gold labels are `(doc_id, verbatim span)`; a chunk is relevant if it comes from that document and contains the span | `evaluate.py` |
-| Wrong-language or unsupported answers | Prompt requires answering in the question's language/script and citing passages; `[NO_ANSWER]` sentinel gives a measurable abstention signal; citations pointing at non-existent passages are flagged | `generate.py` |
+1. How accurately does Qwen3-4B solve everyday quantitative questions involving Nepali units, currency, and calendar conventions?
+2. Does answer accuracy differ between English, Devanagari Nepali, and Romanized Nepali versions of equivalent questions?
+3. How much does providing relevant factual context change performance?
+4. Which domains and question types account for the observed errors?
 
-## Quickstart
+## Experimental Setup
 
-Requires Python 3.10+. The default embedder (`BAAI/bge-m3`) is a ~570M-parameter download and is
-slow on CPU; see *Choosing models* below for smaller options.
+| Component | Setup |
+|---|---|
+| Model | `Qwen/Qwen3-4B` |
+| Evaluation inputs | 300 prompts |
+| Base questions | 50 |
+| Language forms | English, Devanagari Nepali, Romanized Nepali |
+| Context conditions | With context and without context |
+| Domains | Five everyday Nepali quantitative-reasoning domains |
+| Execution environment | Kaggle notebook |
+| Analysis | Accuracy, domain-level errors, paired comparisons, bootstrap confidence intervals |
 
-```bash
-python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
-pip install -e ".[st,dev]"                              # st = sentence-transformers (local models)
-cp .env.example .env                                    # set MLRAG_CONTACT (Wikimedia User-Agent policy)
+The 300 prompts were constructed from 50 base questions, with each question represented in three language forms and evaluated under two context conditions.
 
-mlrag fetch                    # topics in data/topics.yaml -> data/raw/wiki_docs.jsonl (+ coverage table)
-mlrag ingest --recreate        # chunk, embed, index into embedded Qdrant (./data/qdrant_local)
-mlrag ask "नेपालको राजधानी कहाँ हो?"
-mlrag serve                    # FastAPI on :8000 (docs at /docs)
-```
+The questions were supplied by the user or generated outside this repository before the evaluation run. The repository contains the evaluation and analysis workflow; it does not claim to implement the original question-generation process.
 
-```bash
-curl -s localhost:8000/ask -H 'content-type: application/json' \
-  -d '{"question": "Where is Lumbini?", "mode": "hybrid", "top_k": 5}'
-```
+## Methodology
 
-**Qdrant server instead of embedded mode** (embedded mode locks its folder to one process, so the
-API and the CLI cannot run at the same time):
+### 1. Controlled evaluation
 
-```bash
-docker compose up -d qdrant
-echo 'QDRANT_URL=http://localhost:6333' >> .env
-```
+The same underlying question is represented across the three language forms. This makes it possible to compare language conditions while keeping the intended task as consistent as possible.
 
-**Answer generation.** The default `generation.provider: extractive` returns the best passage with a
-citation and needs no LLM, so retrieval can be evaluated for free. For generated answers set
-`provider: ollama` (local, `ollama pull <model>` first) or `provider: openai-compat` (any
-OpenAI-compatible endpoint; set `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` in `.env`).
+Each language form is evaluated with and without relevant factual context. The context condition is intended to test whether supplying missing local facts helps distinguish knowledge limitations from reasoning difficulties.
 
-## Choosing models (compare them, don't assume)
+### 2. Model execution
 
-Nothing here is tuned to one model. Each configuration gets its own Qdrant collection, and the
-index metadata records which embedder built it (a mismatch is refused at startup).
+The notebook loads the specified Qwen3-4B model and executes the prepared evaluation prompts. Responses and associated evaluation metadata are saved for subsequent analysis.
 
-```bash
-MLRAG_CONFIG=configs/e5-small.yaml mlrag ingest --recreate     # lighter, CPU-friendly
-MLRAG_CONFIG=configs/cohere.yaml   mlrag ingest --recreate     # hosted; needs COHERE_API_KEY
-```
+### 3. Scoring and error analysis
 
-Check each model card for Nepali/Devanagari coverage and parameter count, and confirm current hosted
-model names in the provider's docs; the names in `configs/` are starting points.
+The analysis examines overall answer accuracy, performance by domain and language, and the difference between context and no-context conditions.
 
-## Evaluating retrieval
+Paired comparisons use corresponding variants of the same base question rather than treating every prompt as an independent underlying task. Bootstrap confidence intervals are used to communicate uncertainty in estimated performance differences.
 
-The question file is yours to write; the tooling makes that fast and keeps it honest.
+Numerical answers involving ambiguous local-unit conventions require particular care. Questions whose expected answers depend on an unstated or disputed conversion convention should not be treated as unambiguous correctness tests.
 
-```bash
-mlrag template --n 40 --unanswerable 8     # samples indexed passages -> eval/questions.todo.jsonl
-# For each item: write the question in the variants you want to test, and edit "span"
-# to the fragment that actually answers it. Save as eval/questions.jsonl.
-mlrag validate                             # every gold span must exist inside a single indexed chunk
-mlrag eval --modes dense sparse hybrid hybrid+rerank --reference ne
-```
+## Findings and Interpretation
 
-```json
-{"id": "q007", "group": "geography",
- "variants": {"en": "...", "ne": "...", "ne_rom": "...", "ne_typo": "..."},
- "gold": [{"doc_id": "ne:<title>", "span": "short verbatim fragment"}],
- "answerable": true}
-```
+The evaluation is designed to identify concrete failure patterns in Nepali quantitative reasoning rather than assign a single general-purpose capability score to the model.
 
-`variants` are free-form keys, one row per (mode, variant) in the output. Suggested conventions:
-`ne` Devanagari, `ne_rom` Romanized Nepali (ideally written by several people, since Romanization has
-no standard spelling), `ne_typo` realistic hrasva/dirgha errors, `en` English. List more than one
-`gold` entry (for example the Nepali and English passage) to credit cross-lingual matches.
+The main comparisons are:
 
-The report contains hit@k, MRR, a bootstrap 95% CI for hit@5 (with a few dozen questions the intervals
-are wide, so read them before reading differences), mean tokens per word and p95 latency per variant,
-and a paired Δhit@5 against the reference variant. Outputs go to `results/retrieval_<timestamp>.{md,json}`
-together with the configuration that produced them.
+- **Language variation:** Whether equivalent questions receive different accuracy across English, Devanagari Nepali, and Romanized Nepali.
+- **Context availability:** Whether relevant factual context improves answer accuracy.
+- **Domain variation:** Whether errors cluster around particular local units, conversions, currency calculations, or calendar arithmetic.
+- **Error types:** Whether incorrect answers reflect missing facts, incorrect conversion procedures, arithmetic mistakes, or inconsistent interpretation of the question.
 
-**Generation**, evaluated by hand (an LLM judge would add its own multilingual blind spots):
+These findings should be interpreted within the scope of the evaluated question set. They do not establish that Qwen3-4B fails at all Nepali-language tasks, nor do they demonstrate a general safety failure.
 
-```bash
-mlrag gen-sheet --variants en ne ne_rom    # answers + shuffled CSV with the variant column hidden
-# fill the `label` column (define your labels before you start), then:
-mlrag gen-report
-```
+## Repository Contents
 
-Unanswerable questions measure abstention. The script of the question still reveals the variant while
-labeling, so blinding is partial.
+The main artifacts produced by the evaluation workflow include:
 
-## Results
+- `README.md` — project overview, methodology, and interpretation.
+- `results_qwen3_4b.jsonl` — individual evaluation outputs.
+- `eval.json` — evaluation summary.
+- `analysis/headline_accuracy.csv` — headline accuracy results.
+- `analysis/accuracy_by_domain.csv` — accuracy broken down by domain.
+- `analysis/paired_gaps.csv` — paired performance comparisons.
+- `analysis/failure_taxonomy.csv` — categorized failure patterns.
+- `analysis/manual_review_sample.csv` — sample selected for manual review.
+- `run_manifest.json` — run configuration and reproducibility metadata.
+- `qwen3_4b_artifacts.zip` — packaged evaluation artifacts.
 
-_Not filled in yet: this repository ships the harness, and numbers depend on the corpus, the question
-set and the models you pick. Run `mlrag eval` and paste the table here, together with the model,
-chunking and sparse settings it printed, the number of questions, and what the failures looked like._
+The exact files available depend on the artifacts included in the published repository or release.
 
-## Known limitations
+## Reproducibility
 
-- **Romanized Nepali is not bridged lexically.** The sparse branch cannot match *rajdhani* to *राजधानी*;
-  that case relies on the dense model. A transliteration or query-normalisation step is the obvious next
-  experiment and `mlrag eval` is how you would show whether it helps.
-- **Spelling folding is deliberately small** (vowel length, chandrabindu/anusvara). Other common confusions
-  (श/ष/स, ब/व) are not folded.
-- **Multi-turn chat is stateless and shallow**: history is passed to the generator but retrieval uses only
-  the current question; there is no query rewriting.
-- **Corpus asymmetry.** Nepali Wikipedia articles are often far shorter than their English counterparts, which
-  affects cross-lingual comparisons. `mlrag fetch` prints per-language coverage.
-- **Section filters for Nepali** (`fetch.SKIP_HEADINGS`) are a short hand-written list; inspect the data and extend it.
-- **Test coverage is offline.** The test suite (`pytest`) exercises chunking, the analyzer, Qdrant hybrid
-  search, evaluation, the API and the CLI end to end using an in-memory Qdrant and a deterministic, non-semantic
-  hash embedder, plus mocked HTTP for Wikipedia, Ollama and OpenAI-compatible endpoints. It does not download
-  models or call hosted services, so retrieval *quality* is only established by running `mlrag eval` on real data.
-  The local sentence-transformers/cross-encoder adapters, the Docker files and the Streamlit UI are thin and have
-  not been exercised by the tests.
+The repository is intended to make the model evaluation and analysis workflow inspectable and reproducible.
 
-## Layout
+To reproduce the experiment:
 
-```
-src/mlrag/
-  text.py          Unicode normalisation, tokenizer, sentence splitter, spelling folding
-  chunking.py      sentence-aware chunks with a token budget
-  sparse.py        BM25 sparse encoder (hashed terms, Qdrant-side IDF)
-  embedders.py     sentence-transformers | cohere | hash (tests only)
-  rerankers.py     cross-encoder | cohere | none
-  store.py         Qdrant: dense + sparse named vectors, RRF hybrid search, filters
-  ingest.py        documents -> chunks -> vectors -> Qdrant (+ index metadata)
-  retrieve.py      dense / sparse / hybrid [+ rerank] with timings
-  generate.py      grounded prompt, citations, abstention; extractive | ollama | openai-compat
-  pipeline.py      retrieve -> generate -> Answer
-  evaluate.py      metrics, bootstrap CIs, question validation, templates, generation sheets
-  fetch.py         topic-aligned Wikipedia corpus
-  api.py, cli.py   FastAPI service and `mlrag` command
-app/ui.py          optional Streamlit front end
-examples/mlm_demo.py   optional: tokenizer fragmentation and fill-mask with a multilingual MLM
-tests/             offline test suite
-```
+1. Open the evaluation notebook in a compatible Kaggle environment.
+2. Configure access to `Qwen/Qwen3-4B` and the required runtime dependencies.
+3. Make the prepared evaluation inputs available to the notebook.
+4. Run the model evaluation and scoring cells.
+5. Run the analysis cells to regenerate the summary tables and error-analysis artifacts.
 
-## Data and licence
+The notebook and run manifest should be consulted for the exact runtime settings, generation parameters, dependencies, and hardware constraints used in a particular run.
 
-Wikipedia text is CC BY-SA 4.0. `mlrag fetch` records each article's URL, revision id and retrieval date;
-keep that attribution if you publish derived data. `data/raw/` is git-ignored on purpose.
+**Input provenance:** The questions were supplied by the user or generated outside this repository. Reproducing the evaluation therefore requires access to the same prepared inputs; the repository does not claim that those questions can be regenerated from its code alone.
+
+## Limitations
+
+- The evaluation covers a finite set of 50 base questions and their language/context variants.
+- Three language forms do not represent every dialect, spelling variation, or code-mixed query a Nepali speaker might use.
+- A small question set can reveal useful failure cases but cannot establish population-wide model performance.
+- Results may depend on prompt wording, generation settings, and the exact factual context supplied.
+- Some traditional measurement conversions can vary by convention or locality. Ambiguous cases must be excluded from headline accuracy or interpreted separately.
+- Bootstrap intervals quantify uncertainty under the chosen resampling procedure; they do not eliminate limitations in question coverage or dataset construction.
+- This is a single-model evaluation, not a comparison across all frontier models.
+
+## Model and Artifacts
+
+- Model: [Qwen/Qwen3-4B](https://huggingface.co/Qwen/Qwen3-4B)
+- Evaluation artifacts: [Fatima Fellowship Challenge — Hugging Face Bucket](https://huggingface.co/buckets/Prapti-T/Fatima-Fellowship-Challenge)
+
+## Acknowledgment
+
+This project was developed as a technical challenge submission exploring concrete capability gaps in language-model reasoning about everyday Nepali quantities.

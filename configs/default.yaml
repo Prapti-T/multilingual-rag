@@ -16,7 +16,7 @@ embedding:
   batch_size: 32
 
 chunking:
-  max_tokens: 256                 # measured with the embedder's own tokenizer
+  max_tokens: 800
   overlap_sentences: 1
 
 sparse:
