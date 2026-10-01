@@ -1,0 +1,30 @@
+# English Wikipedia article titles. `mlrag fetch` resolves the matching Nepali article through
+# interlanguage links and reports which topics exist in both languages. Titles that are missing
+# are skipped with a warning, so edit this list freely. Nepali articles are frequently short stubs;
+# that asymmetry is a property of the corpus, not a bug.
+topics:
+  # school-curriculum style topics
+  - Photosynthesis
+  - Water cycle
+  - Solar System
+  - Earthquake
+  - Monsoon
+  - Gravity
+  - Electricity
+  - Climate change
+  - Democracy
+  - Cell (biology)
+  - Human digestive system
+  - Pythagorean theorem
+  - Prime number
+  # Nepal-specific topics
+  - Nepal
+  - Kathmandu
+  - Pokhara
+  - Lumbini
+  - Mount Everest
+  - Himalayas
+  - Constitution of Nepal
+  - April 2015 Nepal earthquake
+  - Buddhism
+  - Ganges

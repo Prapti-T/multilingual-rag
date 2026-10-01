@@ -1,0 +1,47 @@
+# Every key is optional; omitted keys fall back to the defaults in src/mlrag/config.py.
+# Secrets and endpoints belong in .env (see .env.example), not here.
+
+qdrant:
+  url: null                       # http://localhost:6333 when using docker compose
+  path: ./data/qdrant_local       # embedded mode (no server) when url is null
+  collection: mlrag_wiki
+
+embedding:
+  provider: sentence-transformers # sentence-transformers | cohere | hash (offline tests only)
+  model: BAAI/bge-m3              # check the model card for Nepali coverage before relying on it
+  # multilingual-e5 models need:  query_prefix: "query: "   doc_prefix: "passage: "
+  query_prefix: ""
+  doc_prefix: ""
+  max_seq_length: 512
+  batch_size: 32
+
+chunking:
+  max_tokens: 256                 # measured with the embedder's own tokenizer
+  overlap_sentences: 1
+
+sparse:
+  enabled: true
+  k1: 1.2
+  b: 0.75
+  fold_vowel_length: true         # hrasva/dirgha folding in the lexical index; evaluate on/off
+
+retrieval:
+  mode: hybrid                    # dense | sparse | hybrid
+  top_k: 5
+  candidate_k: 30                 # candidates passed to the reranker
+  prefetch_k: 50                  # per-branch depth before RRF fusion
+
+reranker:
+  provider: none                  # none | cross-encoder | cohere
+  model: BAAI/bge-reranker-v2-m3
+
+generation:
+  provider: extractive            # extractive (no LLM) | ollama | openai-compat
+  model: qwen2.5:3b
+  base_url: http://localhost:11434
+  temperature: 0.0
+  max_context_chars: 6000
+  history_turns: 3
+
+index:
+  meta_dir: ./data/index

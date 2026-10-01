@@ -1,0 +1,11 @@
+# Lighter, CPU-friendly alternative. Own collection so it never collides with the default index.
+# Check the model card for language coverage before trusting it on Nepali.
+qdrant:
+  collection: mlrag_wiki_e5
+
+embedding:
+  provider: sentence-transformers
+  model: intfloat/multilingual-e5-small
+  query_prefix: "query: "
+  doc_prefix: "passage: "
+  max_seq_length: 512

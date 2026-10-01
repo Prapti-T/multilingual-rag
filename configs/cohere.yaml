@@ -1,0 +1,15 @@
+# Hosted embeddings + rerank (needs COHERE_API_KEY in .env; a free trial key is rate-limited).
+# Confirm current model names in the provider's documentation.
+qdrant:
+  collection: mlrag_wiki_cohere
+
+embedding:
+  provider: cohere
+  model: embed-multilingual-v3.0
+
+chunking:
+  max_tokens: 200          # the hosted tokenizer isn't available locally; token counts are approximated, so stay conservative
+
+reranker:
+  provider: cohere
+  model: rerank-multilingual-v3.0
