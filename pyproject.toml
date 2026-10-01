@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mlrag"
+version = "0.1.0"
+description = "Multilingual (Nepali/English) RAG on Qdrant: hybrid retrieval, grounded answers, and a retrieval evaluation harness."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "pyyaml",
+    "qdrant-client>=1.12",
+    "httpx",
+    "fastapi",
+    "uvicorn",
+]
+
+[project.optional-dependencies]
+# Local open-weight embedder / reranker (BGE-M3, multilingual-e5, ...)
+st = ["sentence-transformers"]
+# Hosted embeddings / rerank (free trial key works for small corpora)
+cohere = ["cohere>=5"]
+ui = ["streamlit"]
+# Optional MLM / tokenizer demo in examples/
+mlm = ["transformers", "torch"]
+dev = ["pytest"]
+
+[project.scripts]
+mlrag = "mlrag.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
